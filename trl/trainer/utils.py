@@ -74,21 +74,31 @@ class DataCollatorForCompletionOnlyLM(DataCollatorForLanguageModeling):
     def __init__(
         self,
         response_template: Union[str, List[int]],
-        instruction_template: Optional[str] = None,
+        instruction_template: Optional[Union[str, List[int]]] = None,
         *args,
         mlm: bool = False,
         ignore_index: int = -100,
         **kwargs,
     ):
         super().__init__(*args, mlm=mlm, **kwargs)
-        self.instruction_template = instruction_template
-        self.response_template = response_template
-        self.ignore_index = ignore_index
+        
         if type(response_template) == list:
             # The user already provides the token ids
             self.response_token_ids = response_template
+            self.response_template = self.tokenizer.decode(self.response_token_ids)
         else:
-            self.response_token_ids = self.tokenizer.encode(self.response_template, add_special_tokens=False)
+            self.response_token_ids = self.tokenizer.encode(response_template, add_special_tokens=False)
+            self.response_template = response_template
+
+        if type(instruction_template) == list:
+            # The user already provides the token ids
+            self.instruction_token_ids = instruction_template
+            self.instruction_template = self.tokenizer.decode(self.instruction_token_ids)
+        else:
+            self.instruction_token_ids = self.tokenizer.encode(instruction_template, add_special_tokens=False)
+            self.instruction_template = instruction_template
+
+        self.ignore_index = ignore_index
 
     def torch_call(self, examples: List[Union[List[int], Any, Dict[str, Any]]]) -> Dict[str, Any]:
         batch = super().torch_call(examples)
@@ -141,10 +151,11 @@ class DataCollatorForCompletionOnlyLM(DataCollatorForLanguageModeling):
                     )
                     batch["labels"][i, :] = self.ignore_index
 
-                human_token_ids = self.tokenizer.encode(self.instruction_template, add_special_tokens=False)
-                for human_idx in np.where(batch["labels"][i] == human_token_ids[0])[0]:
+                for human_idx in np.where(batch["labels"][i] == self.instruction_token_ids[0])[0]:
                     # find the indexes of the start of a human answer.
-                    if human_token_ids == batch["labels"][i][human_idx : human_idx + len(human_token_ids)].tolist():
+                    if (
+                        self.instruction_token_ids == batch["labels"][i][human_idx : human_idx + len(self.instruction_token_ids)].tolist()
+                    ):
                         human_token_ids_idxs.append(human_idx)
 
                 if len(human_token_ids_idxs) == 0:
