@@ -147,8 +147,9 @@ bnb_config = BitsAndBytesConfig(
 
 base_model = AutoModelForCausalLM.from_pretrained(
     script_args.model_name,
-    quantization_config=bnb_config,
-    device_map={"": 0},
+    # quantization_config=bnb_config,
+    # device_map={"": 0},
+    device_map="auto",
     trust_remote_code=True,
     use_auth_token=True,
 )
@@ -158,7 +159,16 @@ peft_config = LoraConfig(
     r=script_args.lora_r,
     lora_alpha=script_args.lora_alpha,
     lora_dropout=script_args.lora_dropout,
-    target_modules=["q_proj", "v_proj"],
+    # target_modules=["q_proj", "v_proj"],
+    target_modules=[
+            "q_proj",
+            "v_proj",
+            "k_proj",
+            "out_proj",
+            "fc_in",
+            "fc_out",
+            "wte",
+        ],
     bias="none",
     task_type="CAUSAL_LM",
 )

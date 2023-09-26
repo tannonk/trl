@@ -519,7 +519,7 @@ def create_reference_model(
     Returns
         `PreTrainedModelWrapper`
     """
-
+    print("Creating reference model by copying the active model")
     parameter_names = [n for n, _ in model.named_parameters()]
     ref_model = deepcopy(model)
 

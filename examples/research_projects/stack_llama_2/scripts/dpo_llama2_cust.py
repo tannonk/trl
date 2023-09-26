@@ -7,7 +7,7 @@ import torch
 from datasets import Dataset, load_dataset
 from peft import AutoPeftModelForCausalLM, LoraConfig
 from transformers import AutoTokenizer, AutoModelForCausalLM, HfArgumentParser, TrainingArguments
-from accelerate import Accelerator
+
 from trl import DPOTrainer
 
 
@@ -58,7 +58,7 @@ class ScriptArguments:
     # instrumentation
     sanity_check: Optional[bool] = field(default=False, metadata={"help": "only train on 1000 samples"})
     report_to: Optional[str] = field(
-        default="wandb",
+        default="none",
         metadata={
             "help": 'The list of integrations to report the results and logs to. Supported platforms are `"azure_ml"`,'
             '`"comet_ml"`, `"mlflow"`, `"neptune"`, `"tensorboard"`,`"clearml"` and `"wandb"`. '
@@ -123,16 +123,22 @@ if __name__ == "__main__":
     parser = HfArgumentParser(ScriptArguments)
     script_args = parser.parse_args_into_dataclasses()[0]
 
-    # 1. load a pretrained model
-    # model = AutoPeftModelForCausalLM.from_pretrained(
-    model = AutoModelForCausalLM.from_pretrained(
-        script_args.model_name_or_path,
-        # low_cpu_mem_usage=False,
-        torch_dtype=torch.float16,
-        # torch_dtype=torch.float32,
-        load_in_4bit=True,
-        device_map={"": Accelerator().process_index},
-    )
+    # # 1. load a pretrained model
+    print("Loading model...")
+    try:
+        model = AutoPeftModelForCausalLM.from_pretrained(
+            script_args.model_name_or_path,
+            low_cpu_mem_usage=True,
+            torch_dtype=torch.float16,
+            load_in_4bit=True,
+        )
+    except ValueError:
+        model = AutoModelForCausalLM.from_pretrained(
+            script_args.model_name_or_path,
+            torch_dtype=torch.float16,
+            # device_map={"": Accelerator().process_index},
+            device_map="auto", 
+            )
     model.config.use_cache = False
 
     if script_args.ignore_bias_buffers:
@@ -141,6 +147,7 @@ if __name__ == "__main__":
             name for name, buffer in model.named_buffers() if buffer.dtype == torch.bool
         ]
 
+    # print("Loading reference model...")
     # model_ref = AutoPeftModelForCausalLM.from_pretrained(
     #     script_args.model_name_or_path,
     #     low_cpu_mem_usage=True,
@@ -148,6 +155,7 @@ if __name__ == "__main__":
     #     load_in_4bit=True,
     # )
     model_ref = None
+
     tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-hf")
     tokenizer.pad_token = tokenizer.eos_token
 
@@ -182,35 +190,30 @@ if __name__ == "__main__":
         lr_scheduler_type=script_args.lr_scheduler_type,
         warmup_steps=script_args.warmup_steps,
         optim=script_args.optimizer_type,
-        # bf16=True,
-        fp16=True,
+        bf16=True,
         remove_unused_columns=False,
         run_name="dpo_llama2",
     )
-
-    target_modules = [
-            'k_proj', 
-            'gate_proj', 
-            'o_proj', 
-            'up_proj', 
-            'down_proj', 
-            'v_proj', 
-            'q_proj'
-            ]
 
     peft_config = LoraConfig(
         r=script_args.lora_r,
         lora_alpha=script_args.lora_alpha,
         lora_dropout=script_args.lora_dropout,
-        target_modules=target_modules,
+        target_modules=[
+            "q_proj",
+            "v_proj",
+            "k_proj",
+            "out_proj",
+            "fc_in",
+            "fc_out",
+            "wte",
+        ],
         bias="none",
         task_type="CAUSAL_LM",
     )
 
-    # breakpoint()
-    # model.enable_input_require_grads()
-
     # 5. initialize the DPO trainer
+    breakpoint()
     dpo_trainer = DPOTrainer(
         model,
         model_ref,
@@ -225,6 +228,7 @@ if __name__ == "__main__":
     )
 
     # 6. train
+    breakpoint()
     dpo_trainer.train()
     dpo_trainer.save_model(script_args.output_dir)
 

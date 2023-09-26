@@ -113,7 +113,7 @@ class DPOTrainer(Trainer):
                 model = prepare_model_for_int8_training(model)
             model = get_peft_model(model, peft_config)
 
-        self.is_peft_model = getattr(model, "is_peft_model", False)
+        self.is_peft_model = getattr(model, "active_adapter", None)
 
         if ref_model:
             self.ref_model = ref_model
@@ -197,10 +197,7 @@ class DPOTrainer(Trainer):
             )
 
         if self.ref_model is None:
-            if not hasattr(
-                self.accelerator.unwrap_model(self.model).pretrained_model,
-                "disable_adapter",
-            ):
+            if not hasattr(self.accelerator.unwrap_model(self.model), "disable_adapter"):
                 raise ValueError(
                     "You are using a `peft` version that does not support `disable_adapter`. Please update your `peft` version to the latest version."
                 )
@@ -314,6 +311,7 @@ class DPOTrainer(Trainer):
         We do this to avoid doing two forward passes, because it's faster for FSDP.
         """
         concatenated_batch = self.concatenated_inputs(batch)
+        print(f'Concatenated input ids has shape: {concatenated_batch["concatenated_input_ids"].shape}')
         all_logits = model(
             concatenated_batch["concatenated_input_ids"],
             attention_mask=concatenated_batch["concatenated_attention_mask"],
@@ -347,7 +345,7 @@ class DPOTrainer(Trainer):
         ) = self.concatenated_forward(model, batch)
         with torch.no_grad():
             if self.ref_model is None:
-                with self.accelerator.unwrap_model(self.model).pretrained_model.disable_adapter():
+                with self.accelerator.unwrap_model(self.model).disable_adapter():
                     (
                         reference_chosen_logps,
                         reference_rejected_logps,
@@ -415,7 +413,7 @@ class DPOTrainer(Trainer):
         )
 
         if self.ref_model is None:
-            with self.accelerator.unwrap_model(self.model).pretrained_model.disable_adapter():
+            with self.accelerator.unwrap_model(self.model).disable_adapter():
                 reference_output = self.model.generate(
                     batch["prompt_input_ids"],
                     attention_mask=batch["prompt_attention_mask"],
